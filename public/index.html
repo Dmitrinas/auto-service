@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+  <meta name="theme-color" content="#0f172a" />
+  <title>Автосервис — Заказ-наряды</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <!-- Toast container -->
+  <div id="toast-container"></div>
+
+  <!-- Bell with notifications -->
+  <div id="bell" class="bell hidden" title="Уведомления">
+    <span class="bell-icon">🔔</span>
+    <span id="bell-count" class="bell-count hidden">0</span>
+    <div id="bell-dropdown" class="bell-dropdown hidden"></div>
+  </div>
+
+  <!-- View: Auth -->
+  <section id="view-auth" class="view">
+    <div class="auth-card">
+      <h1>🚗 Автосервис</h1>
+      <p class="muted">Электронные заказ-наряды</p>
+
+      <div class="role-tabs">
+        <button class="tab active" data-role="admin">Админ</button>
+        <button class="tab" data-role="master">Мастер-приёмщик</button>
+        <button class="tab" data-role="mechanic">Автомеханик</button>
+      </div>
+
+      <form id="auth-form">
+        <!-- Admin / Master fields -->
+        <label class="row">
+          <span>Логин</span>
+          <input name="username" autocomplete="username" />
+        </label>
+        <label class="row">
+          <span>Пароль</span>
+          <input name="password" type="password" autocomplete="current-password" />
+        </label>
+
+        <!-- Mechanic fields -->
+        <label class="row mech-only hidden">
+          <span>Имя</span>
+          <input name="name" placeholder="Например: Петров Пётр" />
+        </label>
+        <label class="row mech-only hidden">
+          <span>Табельный номер</span>
+          <input name="personnel_no" placeholder="Например: 001" />
+        </label>
+
+        <button class="primary block" type="submit">Войти</button>
+        <p id="auth-error" class="error"></p>
+      </form>
+
+      <details class="hint">
+        <summary>Демо-аккаунты</summary>
+        <ul>
+          <li><b>Админ:</b> admin / admin</li>
+          <li><b>Мастер-приёмщик:</b> master1 / pass</li>
+          <li><b>Механик:</b> Петров Пётр / 001</li>
+          <li><b>Механик:</b> Сидоров Алексей / 002</li>
+        </ul>
+      </details>
+    </div>
+  </section>
+
+  <!-- View: Admin -->
+  <section id="view-admin" class="view hidden">
+    <header class="appbar">
+      <h2>👑 Админ</h2>
+      <button class="ghost icon-only" data-action="logout" title="Выйти">↪</button>
+    </header>
+
+    <div class="container">
+      <h3>Мастера-приёмщики</h3>
+      <form id="form-add-master" class="row-form">
+        <input name="name" placeholder="ФИО мастера" required />
+        <input name="username" placeholder="Логин" required />
+        <input name="password" placeholder="Пароль" type="password" required />
+        <button class="primary" type="submit">+ Добавить</button>
+      </form>
+      <ul id="list-masters" class="user-list"></ul>
+
+      <h3>Автомеханики</h3>
+      <form id="form-add-mechanic" class="row-form">
+        <input name="name" placeholder="ФИО механика" required />
+        <input name="personnel_no" placeholder="Табельный №" required />
+        <button class="primary" type="submit">+ Добавить</button>
+      </form>
+      <ul id="list-mechanics" class="user-list"></ul>
+    </div>
+  </section>
+
+  <!-- View: Master -->
+  <section id="view-master" class="view hidden">
+    <header class="appbar">
+      <h2>🧰 Мастер</h2>
+      <span class="muted user-tag" id="master-name"></span>
+      <button class="ghost icon-only" data-action="logout" title="Выйти">↪</button>
+    </header>
+
+    <div class="container">
+      <div class="page-actions">
+        <button class="primary block" data-master-tab="new" id="master-new-btn">+ Новый заказ-наряд</button>
+      </div>
+
+      <div class="tabs">
+        <button class="tab active" data-master-tab="active">Активные</button>
+        <button class="tab" data-master-tab="done">Выполненные</button>
+        <button class="tab" data-master-tab="archived">Архив</button>
+      </div>
+
+      <div id="master-tab-active" class="tab-pane">
+        <ul id="list-orders-active" class="order-list"></ul>
+      </div>
+      <div id="master-tab-done" class="tab-pane hidden">
+        <ul id="list-orders-done" class="order-list"></ul>
+      </div>
+      <div id="master-tab-archived" class="tab-pane hidden">
+        <ul id="list-orders-archived" class="order-list"></ul>
+      </div>
+
+      <div id="master-tab-new" class="tab-pane hidden">
+        <form id="form-new-order" class="card-form">
+          <h3>Новый заказ-наряд</h3>
+          <label><span>Номер заказ-наряда</span><input name="order_number" required placeholder="ЗН-2026-0002" /></label>
+          <div class="grid2">
+            <label><span>Марка и модель авто</span><input name="car_brand_model" required placeholder="Toyota Camry 70" /></label>
+            <label><span>VIN</span><input name="vin" required placeholder="XW7BF4FK30S123456" /></label>
+            <label><span>Гос-номер</span><input name="plate" required placeholder="А123БВ 777" /></label>
+            <label><span>Пробег</span><input name="mileage" required placeholder="85 400" /></label>
+          </div>
+          <label><span>ФИО клиента</span><input name="client_name" required placeholder="Иванов Иван Иванович" /></label>
+          <label>
+            <span>Запчасти</span>
+            <select name="parts_source">
+              <option value="our">Наши</option>
+              <option value="client">Клиента</option>
+            </select>
+          </label>
+          <label>
+            <span>Автомеханик (исполнитель)</span>
+            <select name="mechanic_id" required></select>
+          </label>
+
+          <h4>Работы (трудоёмкость, ч)</h4>
+          <div id="new-order-works"></div>
+          <button type="button" class="ghost" id="add-work-row">+ Добавить работу</button>
+
+          <button class="primary block" type="submit">Создать и передать механику</button>
+          <p id="new-order-error" class="error"></p>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <!-- View: Order Detail (Master perspective) -->
+  <section id="view-order" class="view hidden">
+    <header class="appbar">
+      <button class="ghost icon-only" data-action="back" title="Назад">←</button>
+      <h2 id="order-detail-title">Заказ-наряд</h2>
+    </header>
+    <div class="container" id="order-detail-body"></div>
+  </section>
+
+  <!-- View: Mechanic -->
+  <section id="view-mechanic" class="view hidden">
+    <header class="appbar">
+      <h2>🔧 Механик</h2>
+      <span class="muted user-tag" id="mechanic-name"></span>
+      <button class="ghost icon-only" data-action="logout" title="Выйти">↪</button>
+    </header>
+    <div class="container">
+      <div class="tabs">
+        <button class="tab active" data-mech-tab="active">В работе</button>
+        <button class="tab" data-mech-tab="done">Выполненные</button>
+      </div>
+      <div id="mech-tab-active" class="tab-pane">
+        <ul id="list-mech-active" class="order-list"></ul>
+      </div>
+      <div id="mech-tab-done" class="tab-pane hidden">
+        <ul id="list-mech-done" class="order-list"></ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- View: Mechanic Order Detail -->
+  <section id="view-mech-order" class="view hidden">
+    <header class="appbar">
+      <button class="ghost icon-only" data-action="back" title="Назад">←</button>
+      <h2 id="mech-order-title">Заказ-наряд</h2>
+    </header>
+    <div class="container" id="mech-order-body"></div>
+  </section>
+
+  <!-- Print-only document (hidden on screen) -->
+  <div id="print-doc" class="print-only"></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

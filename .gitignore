@@ -1,0 +1,14 @@
+node_modules/
+data/
+data.db
+data.db-shm
+data.db-wal
+public/uploads/photos/*
+!public/uploads/photos/.gitkeep
+preview/
+.DS_Store
+*.log
+.env
+.env.local
+.idea/
+.vscode/
