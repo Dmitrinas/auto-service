@@ -162,6 +162,33 @@ function visibleOrdersWhere(user) {
   return { sql: '0=1', params: [] };
 }
 
+app.get('/api/orders/next-number', authRequired, requireRole('master'), (req, res) => {
+  // Find the highest number in orders matching pattern ЗН-YYYY-NNNN
+  const year = new Date().getFullYear();
+  const prefix = `ЗН-${year}-`;
+  const rows = db.prepare(
+    `SELECT order_number FROM orders WHERE order_number LIKE ?`
+  ).all(prefix + '%');
+  let max = 0;
+  for (const r of rows) {
+    const m = r.order_number.match(new RegExp(`^${prefix}(\\d+)$`));
+    if (m) {
+      const n = parseInt(m[1], 10);
+      if (n > max) max = n;
+    }
+  }
+  // Find any other number pattern too (e.g. "33", "34")
+  const all = db.prepare(`SELECT order_number FROM orders`).all();
+  for (const r of all) {
+    const m = String(r.order_number).match(/(\d+)\s*$/);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      if (n > max) max = n;
+    }
+  }
+  res.json({ next_number: `${prefix}${String(max + 1).padStart(4, '0')}` });
+});
+
 app.get('/api/orders', authRequired, (req, res) => {
   const { status } = req.query;
   const w = visibleOrdersWhere(req.user);

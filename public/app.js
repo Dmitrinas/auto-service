@@ -16,6 +16,11 @@ async function api(path, opts = {}) {
   if (App.token) headers.Authorization = `Bearer ${App.token}`;
   const res = await fetch(path, { ...opts, headers });
   if (res.status === 401) {
+    const data = await res.json().catch(() => ({}));
+    // Don't kick the user back to auth on a failed login — that's a credentials issue
+    if (path === '/api/auth/login') {
+      throw new Error(data.error || 'Неверный логин или пароль');
+    }
     logout();
     throw new Error('Сессия истекла');
   }
@@ -100,8 +105,14 @@ function startPolling() {
   if (App.pollHandle) return;
   refreshBell();
   App.pollHandle = setInterval(() => {
+    // Skip polling if user is typing or voice is active — otherwise
+    // the innerHTML replacement destroys the focused input/textarea and
+    // collapses the soft keyboard on mobile.
+    if (App.fieldFocused) return;
+    const ae = document.activeElement;
+    if (ae && (ae.matches('input, textarea, select') || ae.isContentEditable)) return;
+    if (App.voiceActive) return;
     refreshBell();
-    // Light refresh of lists if on master/mechanic view
     if (App.view === 'master') {
       const activeTab = document.querySelector('#view-master .tabs .tab.active')?.dataset.masterTab;
       if (activeTab === 'active') loadMasterOrders('in_progress');
@@ -531,6 +542,12 @@ async function prepareNewOrderForm() {
     sel.innerHTML = '<option value="">— выберите —</option>' +
       mechanics.map(m => `<option value="${m.id}">${escapeHtml(m.name)} (таб. ${escapeHtml(m.personnel_no)})</option>`).join('');
   } catch (e) { toast(e.message, 'error'); }
+  // Auto-suggest next unique order number so user doesn't bump into duplicates
+  try {
+    const { next_number } = await api('/api/orders/next-number');
+    const numInput = document.querySelector('#form-new-order input[name="order_number"]');
+    if (numInput && !numInput.value) numInput.value = next_number;
+  } catch (e) { /* non-fatal */ }
   // Reset works rows
   const works = document.getElementById('new-order-works');
   works.innerHTML = '';
@@ -857,20 +874,59 @@ function startVoice(btn, targetInput) {
     btn._recog && btn._recog.stop();
     return;
   }
+  // Resolve the target element by ID so we survive DOM re-renders that may
+  // happen while the user is talking (polling, updates, etc.).
+  let targetId = null;
+  if (targetInput && targetInput.id) {
+    targetId = targetInput.id;
+  } else if (targetInput) {
+    // Give it a unique id so we can re-find it
+    targetId = 'voice-target-' + Date.now();
+    targetInput.id = targetId;
+  }
   const recog = new SR();
   recog.lang = 'ru-RU';
   recog.interimResults = false;
   recog.maxAlternatives = 1;
-  recog.onstart = () => btn.classList.add('listening');
-  recog.onend = () => btn.classList.remove('listening');
-  recog.onerror = (e) => { toast('Ошибка распознавания: ' + e.error, 'error'); btn.classList.remove('listening'); };
+  recog.continuous = false;
+  recog.onstart = () => {
+    btn.classList.add('listening');
+    App.voiceActive = true; // pause polling
+  };
+  recog.onend = () => {
+    btn.classList.remove('listening');
+    App.voiceActive = false;
+  };
+  recog.onerror = (e) => {
+    btn.classList.remove('listening');
+    App.voiceActive = false;
+    const msg = ({'not-allowed':'Нет доступа к микрофону. Разрешите доступ в настройках браузера.',
+                  'no-speech':'Не услышал речь. Попробуйте ещё раз.',
+                  'audio-capture':'Микрофон не найден.',
+                  'network':'Проблема с сетью для распознавания.'})[e.error] || ('Ошибка: ' + e.error);
+    toast(msg, 'error');
+  };
   recog.onresult = (e) => {
     const text = e.results[0][0].transcript;
-    targetInput.value = (targetInput.value ? targetInput.value + ' ' : '') + text;
+    if (!text) return;
+    // Re-find the input by ID in case it was re-rendered
+    const el = document.getElementById(targetId);
+    if (el) {
+      const cur = el.value || '';
+      el.value = cur ? (cur + (cur.endsWith(' ') || cur.endsWith('\n') ? '' : ' ') + text) : text;
+      // Make sure it's focused and visible
+      el.focus();
+      try { el.setSelectionRange(el.value.length, el.value.length); } catch {}
+    }
   };
   btn._recog = recog;
-  recog.start();
-  toast('Говорите…', 'info', 2000);
+  try {
+    recog.start();
+    toast('Говорите…', 'info', 2000);
+  } catch (err) {
+    toast('Не удалось запустить распознавание: ' + err.message, 'error');
+    App.voiceActive = false;
+  }
 }
 
 // =====================================================
@@ -910,18 +966,29 @@ function initKeyboardFix() {
   document.addEventListener('focusin', (e) => {
     const el = e.target;
     if (!isField(el) || el.readOnly || el.disabled) return;
-    // First pass — give the browser a chance to auto-scroll
-    setTimeout(() => ensureVisible(el), 50);
-    // Second pass — after keyboard animation
-    setTimeout(() => ensureVisible(el), 350);
-    // Third pass — for stubborn browsers
-    setTimeout(() => ensureVisible(el), 700);
-    // Re-focus if lost
+    // Mark that a field is focused — the polling loop will skip DOM re-renders
+    App.fieldFocused = true;
+    // Only scroll if the field is significantly out of view — don't fight
+    // the browser's own keyboard-up scrolling on every keystroke.
     setTimeout(() => {
-      if (document.activeElement !== el && el.isConnected && !el.disabled) {
-        try { el.focus({ preventScroll: true }); ensureVisible(el); } catch { /* ignore */ }
+      const r = el.getBoundingClientRect();
+      const vh = window.innerHeight;
+      // If the field's bottom is hidden by the keyboard, scroll minimally
+      if (r.top < 0 || r.bottom > vh * 0.7) {
+        ensureVisible(el);
       }
-    }, 400);
+    }, 350);
+  });
+
+  // On focusout, give time for focus to move to another input before resetting
+  document.addEventListener('focusout', (e) => {
+    // Small delay so we don't flip the flag if focus moves to another input
+    setTimeout(() => {
+      const ae = document.activeElement;
+      if (!ae || !ae.matches || !ae.matches('input, textarea, select')) {
+        App.fieldFocused = false;
+      }
+    }, 300);
   });
 
   // Also handle programmatic focus (e.g. .focus() in JS)
@@ -929,7 +996,7 @@ function initKeyboardFix() {
   HTMLElement.prototype.focus = function (opts) {
     origFocus.call(this, opts);
     if (isField(this) && document.hasFocus && document.hasFocus()) {
-      setTimeout(() => ensureVisible(this), 50);
+      App.fieldFocused = true;
     }
   };
 }
