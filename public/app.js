@@ -152,49 +152,70 @@ function statusLabel(s) {
 function partsLabel(s) { return s === 'client' ? 'Запчасти клиента' : 'Наши запчасти'; }
 
 // =====================================================
-// Auth view
+// Auth view (role selector + 3 dedicated login forms)
 // =====================================================
-function initAuthView() {
-  const tabs = document.querySelectorAll('#view-auth .role-tabs .tab');
-  const form = document.getElementById('auth-form');
-  const errEl = document.getElementById('auth-error');
-
-  tabs.forEach(t => t.addEventListener('click', () => {
-    tabs.forEach(x => x.classList.remove('active'));
-    t.classList.add('active');
-    const role = t.dataset.role;
-    form.querySelectorAll('.mech-only').forEach(el => el.classList.toggle('hidden', role !== 'mechanic'));
-    form.querySelectorAll('input[name="username"], input[name="password"]').forEach(el => {
-      el.closest('.row').classList.toggle('hidden', role === 'mechanic');
+function initRoleLoginForms() {
+  // Each login form is now separate. The selector at #view-auth links to
+  // /#/admin, /#/master, /#/mechanic which trigger the right login view.
+  const wire = (formId, errId, role, build) => {
+    const form = document.getElementById(formId);
+    if (!form) return;
+    const errEl = document.getElementById(errId);
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errEl.textContent = '';
+      const fd = new FormData(form);
+      const body = build(fd);
+      try {
+        const { token, user } = await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ role, ...body }) });
+        App.token = token;
+        App.user = user;
+        localStorage.setItem('token', token);
+        localStorage.setItem('user', JSON.stringify(user));
+        toast(`Добро пожаловать, ${user.name}!`, 'success');
+        location.hash = '#/';
+        routeForRole();
+      } catch (err) {
+        errEl.textContent = err.message;
+      }
     });
-    errEl.textContent = '';
-  }));
+  };
+  wire('form-login-admin', 'login-admin-error', 'admin',
+    fd => ({ username: fd.get('username')?.trim(), password: fd.get('password') }));
+  wire('form-login-master', 'login-master-error', 'master',
+    fd => ({ username: fd.get('username')?.trim(), password: fd.get('password') }));
+  wire('form-login-mechanic', 'login-mechanic-error', 'mechanic',
+    fd => ({ name: fd.get('name')?.trim(), personnel_no: fd.get('personnel_no')?.trim() }));
+}
 
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    errEl.textContent = '';
-    const role = document.querySelector('#view-auth .role-tabs .tab.active').dataset.role;
-    const fd = new FormData(form);
-    const body = { role };
-    if (role === 'mechanic') {
-      body.name = fd.get('name')?.trim();
-      body.personnel_no = fd.get('personnel_no')?.trim();
-    } else {
-      body.username = fd.get('username')?.trim();
-      body.password = fd.get('password');
-    }
-    try {
-      const { token, user } = await api('/api/auth/login', { method: 'POST', body: JSON.stringify(body) });
-      App.token = token;
-      App.user = user;
-      localStorage.setItem('token', token);
-      localStorage.setItem('user', JSON.stringify(user));
-      toast(`Добро пожаловать, ${user.name}!`, 'success');
-      routeForRole();
-    } catch (err) {
-      errEl.textContent = err.message;
-    }
-  });
+function initHashRouting() {
+  // Map URL hash → which view to show
+  //   #/           → role selector
+  //   #/admin      → admin login
+  //   #/master     → master login
+  //   #/mechanic   → mechanic login
+  const map = {
+    '': 'auth',
+    '#': 'auth',
+    '#/': 'auth',
+    '#/admin': 'login-admin',
+    '#/master': 'login-master',
+    '#/mechanic': 'login-mechanic',
+  };
+  function apply() {
+    // If user is logged in, routeForRole takes priority over hash
+    if (App.token && App.user) return;
+    const viewId = map[location.hash] || 'auth';
+    showView(viewId);
+  }
+  window.addEventListener('hashchange', apply);
+  // Initial application
+  if (!App.token && location.hash !== '' && location.hash !== '#' && location.hash !== '#/') {
+    // Already set in URL
+  } else if (!App.token) {
+    showView('auth');
+  }
+  apply();
 }
 
 function routeForRole() {
@@ -208,6 +229,64 @@ function routeForRole() {
 // =====================================================
 // Admin
 // =====================================================
+// -------- Backup / Restore --------
+async function exportData() {
+  try {
+    const token = App.token;
+    const [users, orders, wRes, pRes, nRes] = await Promise.all([
+      api('/api/admin/users', { headers: { Authorization: 'Bearer ' + token } }),
+      api('/api/orders'),
+      fetch('/api/orders', { headers: { Authorization: 'Bearer ' + token } }).then(r => r.json()),
+    ]);
+    // Detailed export: per order, fetch full details
+    const detailedOrders = [];
+    for (const o of orders.orders) {
+      const r = await api('/api/orders/' + o.id);
+      detailedOrders.push(r.order);
+    }
+    const data = {
+      version: 1,
+      exported_at: new Date().toISOString(),
+      users: users.users,
+      orders: detailedOrders,
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `auto-service-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast('Резервная копия скачана', 'success');
+  } catch (e) { toast('Ошибка экспорта: ' + e.message, 'error'); }
+}
+
+function importData(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  if (!confirm('Импорт заменит текущих пользователей, заказы, работы, фото. Продолжить?')) return;
+  const reader = new FileReader();
+  reader.onload = async (ev) => {
+    try {
+      const data = JSON.parse(ev.target.result);
+      // Send to server for restore
+      const r = await api('/api/admin/restore', { method: 'POST', body: JSON.stringify(data) });
+      toast(`Импортировано: ${r.imported?.users ?? '?'} юзеров, ${r.imported?.orders ?? '?'} нарядов`, 'success');
+      loadAdmin();
+    } catch (err) { toast('Ошибка импорта: ' + err.message, 'error'); }
+  };
+  reader.readAsText(file);
+}
+
+async function resetDemo() {
+  if (!confirm('Удалить все наряды, работы, фото, уведомления и не-демо пользователей? Демо-аккаунты останутся.')) return;
+  try {
+    await api('/api/admin/reset-demo', { method: 'POST' });
+    toast('Демо-данные сброшены', 'success');
+    loadAdmin();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
 async function loadAdmin() {
   try {
     const { users } = await api('/api/admin/users');
@@ -218,7 +297,8 @@ async function loadAdmin() {
         <span class="badge">Мастер</span>
         <span class="name">${escapeHtml(m.name)}</span>
         <span class="meta">логин: ${escapeHtml(m.username || '—')}</span>
-        <button class="danger" data-del-user="${m.id}">Удалить</button>
+        ${m.is_demo ? '<span class="badge-demo" title="Создан при первом запуске, нельзя удалить">демо</span>' : '<span class="badge-new">новый</span>'}
+        ${!m.is_demo ? `<button class="danger" data-del-user="${m.id}">Удалить</button>` : ''}
       </li>
     `).join('') || '<li class="muted">Нет мастеров</li>';
     document.getElementById('list-mechanics').innerHTML = mechs.map(m => `
@@ -226,7 +306,8 @@ async function loadAdmin() {
         <span class="badge">Механик</span>
         <span class="name">${escapeHtml(m.name)}</span>
         <span class="meta">таб. №${escapeHtml(m.personnel_no || '—')}</span>
-        <button class="danger" data-del-user="${m.id}">Удалить</button>
+        ${m.is_demo ? '<span class="badge-demo" title="Создан при первом запуске, нельзя удалить">демо</span>' : '<span class="badge-new">новый</span>'}
+        ${!m.is_demo ? `<button class="danger" data-del-user="${m.id}">Удалить</button>` : ''}
       </li>
     `).join('') || '<li class="muted">Нет механиков</li>';
     document.querySelectorAll('[data-del-user]').forEach(b => {
@@ -243,6 +324,17 @@ async function loadAdmin() {
 }
 
 function initAdminView() {
+  // Export / Import / Reset demo data
+  document.getElementById('btn-export').addEventListener('click', exportData);
+  document.getElementById('btn-import').addEventListener('click', () => {
+    const inp = document.createElement('input');
+    inp.type = 'file';
+    inp.accept = 'application/json';
+    inp.addEventListener('change', importData);
+    inp.click();
+  });
+  document.getElementById('btn-reset-demo').addEventListener('click', resetDemo);
+
   document.getElementById('form-add-master').addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
@@ -1005,10 +1097,11 @@ function initKeyboardFix() {
 // Init
 // =====================================================
 document.addEventListener('DOMContentLoaded', () => {
-  initAuthView();
+  initRoleLoginForms();
   initAdminView();
   initNewOrderForm();
   initKeyboardFix();
+  initHashRouting();
 
   // Bell click
   document.getElementById('bell').addEventListener('click', (e) => {
@@ -1045,9 +1138,8 @@ document.addEventListener('DOMContentLoaded', () => {
       App.user = null;
       localStorage.removeItem('token');
       localStorage.removeItem('user');
-      showView('auth');
+      // Don't force auth view — let hash routing handle it
     });
-  } else {
-    showView('auth');
   }
+  // (no else: hash routing decides which view to show)
 });

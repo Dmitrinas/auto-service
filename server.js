@@ -90,7 +90,7 @@ app.get('/api/auth/me', authRequired, (req, res) => res.json({ user: req.user })
 
 // -------- Admin: users --------
 app.get('/api/admin/users', authRequired, requireRole('admin'), (req, res) => {
-  const rows = db.prepare('SELECT id, role, name, username, personnel_no, created_at FROM users ORDER BY role, name').all();
+  const rows = db.prepare('SELECT id, role, name, username, personnel_no, is_demo, created_at FROM users ORDER BY role, name').all();
   res.json({ users: rows });
 });
 app.post('/api/admin/users', authRequired, requireRole('admin'), (req, res) => {
@@ -116,11 +116,83 @@ app.post('/api/admin/users', authRequired, requireRole('admin'), (req, res) => {
     return res.json({ id: info.lastInsertRowid });
   }
 });
+app.post('/api/admin/reset-demo', authRequired, requireRole('admin'), (req, res) => {
+  // Wipe all non-demo data and re-seed. Demo users (is_demo=1) survive.
+  try {
+    db.exec(`
+      DELETE FROM notifications;
+      DELETE FROM photos;
+      DELETE FROM works;
+      DELETE FROM orders;
+      DELETE FROM users WHERE is_demo = 0;
+    `);
+    // Reset admin password to 'admin' (in case it was changed)
+    const admin = db.prepare("SELECT id FROM users WHERE role='admin' AND is_demo=1").get();
+    if (admin) {
+      db.prepare("UPDATE users SET password_hash=? WHERE id=?").run(bcrypt.hashSync('admin', 10), admin.id);
+    }
+    res.json({ ok: true, message: 'Демо-данные сброшены. Все заказы, работы, фото, уведомления удалены. Не-демо пользователи удалены.' });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.post('/api/admin/restore', authRequired, requireRole('admin'), (req, res) => {
+  const data = req.body;
+  if (!data || !data.users || !data.orders) return res.status(400).json({ error: 'Invalid backup file' });
+  const tx = db.transaction(() => {
+    // Wipe everything (including photos on disk)
+    const photos = db.prepare('SELECT filename FROM photos').all();
+    for (const p of photos) {
+      try { require('fs').unlinkSync(path.join(PHOTOS_DIR, p.filename)); } catch {}
+    }
+    db.exec(`
+      DELETE FROM notifications;
+      DELETE FROM photos;
+      DELETE FROM works;
+      DELETE FROM orders;
+      DELETE FROM users;
+    `);
+    // Insert users
+    const insUser = db.prepare(
+      `INSERT INTO users (id, role, name, username, password_hash, personnel_no, is_demo, created_at)
+       VALUES (?,?,?,?,?,?,?, COALESCE(?, datetime('now')))`
+    );
+    for (const u of data.users) {
+      insUser.run(u.id, u.role, u.name, u.username || null, u.password_hash || null, u.personnel_no || null, u.is_demo || 0, u.created_at || null);
+    }
+    // Insert orders
+    const insOrder = db.prepare(
+      `INSERT INTO orders (id, order_number, created_at, car_brand_model, vin, plate, mileage, client_name, parts_source, status, master_id, mechanic_id, recommendations, completed_at, archived_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+    );
+    for (const o of data.orders) {
+      insOrder.run(o.id, o.order_number, o.created_at, o.car_brand_model || null, o.vin || null, o.plate || null, o.mileage || null, o.client_name || null, o.parts_source || 'our', o.status, o.master_id, o.mechanic_id, o.recommendations || null, o.completed_at || null, o.archived_at || null);
+    }
+    // Works
+    const insWork = db.prepare(
+      `INSERT INTO works (id, order_id, title, labor_hours, done, sort_order) VALUES (?,?,?,?,?,?)`
+    );
+    for (const o of data.orders) {
+      (o.works || []).forEach((w, i) => {
+        insWork.run(w.id || null, o.id, w.title, w.labor_hours || 0, w.done ? 1 : 0, w.sort_order || i + 1);
+      });
+    }
+  });
+  try {
+    tx();
+    res.json({ ok: true, imported: { users: data.users.length, orders: data.orders.length } });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
 app.delete('/api/admin/users/:id', authRequired, requireRole('admin'), (req, res) => {
   const id = parseInt(req.params.id, 10);
   const u = db.prepare('SELECT * FROM users WHERE id=?').get(id);
   if (!u) return res.status(404).json({ error: 'not found' });
   if (u.role === 'admin') return res.status(400).json({ error: 'Нельзя удалить админа' });
+  if (u.is_demo) return res.status(400).json({ error: 'Нельзя удалить демо-пользователя (используйте сброс демо-данных)' });
   // Unlink from orders
   db.prepare('UPDATE orders SET master_id = (SELECT id FROM users WHERE role=? LIMIT 1) WHERE master_id=?').run('admin', id);
   const activeMech = db.prepare("SELECT COUNT(*) AS c FROM orders WHERE mechanic_id=? AND status!='archived'").get(id).c;

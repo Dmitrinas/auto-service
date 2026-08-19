@@ -21,6 +21,7 @@ function init() {
       username TEXT,
       password_hash TEXT,
       personnel_no TEXT,
+      is_demo INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -77,22 +78,28 @@ function init() {
     );
   `);
 
+  // Migration: add is_demo column to existing DBs
+  const cols = db.prepare("PRAGMA table_info(users)").all();
+  if (!cols.find(c => c.name === 'is_demo')) {
+    db.exec("ALTER TABLE users ADD COLUMN is_demo INTEGER NOT NULL DEFAULT 0");
+  }
+
   // Seed demo data on first run
   const userCount = db.prepare('SELECT COUNT(*) AS c FROM users').get().c;
   if (userCount === 0) {
     const insertUser = db.prepare(
-      'INSERT INTO users (role, name, username, password_hash, personnel_no) VALUES (?,?,?,?,?)'
+      'INSERT INTO users (role, name, username, password_hash, personnel_no, is_demo) VALUES (?,?,?,?,?,?)'
     );
 
     // Admin: admin / admin
-    insertUser.run('admin', 'Администратор', 'admin', bcrypt.hashSync('admin', 10), null);
+    insertUser.run('admin', 'Администратор', 'admin', bcrypt.hashSync('admin', 10), null, 1);
 
     // Master: master1 / pass
-    insertUser.run('master', 'Иванов Иван', 'master1', bcrypt.hashSync('pass', 10), null);
+    insertUser.run('master', 'Иванов Иван', 'master1', bcrypt.hashSync('pass', 10), null, 1);
 
     // Mechanics: 001 and 002
-    insertUser.run('mechanic', 'Петров Пётр', null, null, '001');
-    insertUser.run('mechanic', 'Сидоров Алексей', null, null, '002');
+    insertUser.run('mechanic', 'Петров Пётр', null, null, '001', 1);
+    insertUser.run('mechanic', 'Сидоров Алексей', null, null, '002', 1);
 
     // Demo order
     const masterId = db.prepare("SELECT id FROM users WHERE username='master1'").get().id;

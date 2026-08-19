@@ -18,51 +18,107 @@
     <div id="bell-dropdown" class="bell-dropdown hidden"></div>
   </div>
 
-  <!-- View: Auth -->
+  <!-- View: Auth (role selector) -->
   <section id="view-auth" class="view">
-    <div class="auth-card">
+    <div class="auth-card role-picker">
       <h1>🚗 Автосервис</h1>
       <p class="muted">Электронные заказ-наряды</p>
-
-      <div class="role-tabs">
-        <button class="tab active" data-role="admin">Админ</button>
-        <button class="tab" data-role="master">Мастер-приёмщик</button>
-        <button class="tab" data-role="mechanic">Автомеханик</button>
+      <p class="muted" style="margin-top:16px">Выберите роль для входа:</p>
+      <div class="role-grid">
+        <a class="role-card" href="#/admin">
+          <div class="role-emoji">👑</div>
+          <div class="role-name">Админ</div>
+          <div class="role-desc">Управление сотрудниками</div>
+        </a>
+        <a class="role-card" href="#/master">
+          <div class="role-emoji">🧰</div>
+          <div class="role-name">Мастер-приёмщик</div>
+          <div class="role-desc">Создание заказ-нарядов</div>
+        </a>
+        <a class="role-card" href="#/mechanic">
+          <div class="role-emoji">🔧</div>
+          <div class="role-name">Автомеханик</div>
+          <div class="role-desc">Выполнение работ</div>
+        </a>
       </div>
+      <p class="muted" style="margin-top:20px;font-size:0.85em">
+        Демо-аккаунты: admin/admin, master1/pass, Петров Пётр/001, Сидоров Алексей/002
+      </p>
+    </div>
+  </section>
 
-      <form id="auth-form">
-        <!-- Admin / Master fields -->
+  <!-- View: Admin Login -->
+  <section id="view-login-admin" class="view hidden">
+    <div class="auth-card">
+      <a class="back-link" href="#/">← Назад</a>
+      <h1>👑 Вход для администратора</h1>
+      <p class="muted">Управление мастерами и механиками</p>
+      <form id="form-login-admin">
         <label class="row">
           <span>Логин</span>
-          <input name="username" autocomplete="username" />
+          <input name="username" autocomplete="username" required />
         </label>
         <label class="row">
           <span>Пароль</span>
-          <input name="password" type="password" autocomplete="current-password" />
+          <input name="password" type="password" autocomplete="current-password" required />
         </label>
-
-        <!-- Mechanic fields -->
-        <label class="row mech-only hidden">
-          <span>Имя</span>
-          <input name="name" placeholder="Например: Петров Пётр" />
-        </label>
-        <label class="row mech-only hidden">
-          <span>Табельный номер</span>
-          <input name="personnel_no" placeholder="Например: 001" />
-        </label>
-
-        <button class="primary block" type="submit">Войти</button>
-        <p id="auth-error" class="error"></p>
+        <button class="primary block" type="submit">Войти как админ</button>
+        <p id="login-admin-error" class="error"></p>
       </form>
-
       <details class="hint">
-        <summary>Демо-аккаунты</summary>
-        <ul>
-          <li><b>Админ:</b> admin / admin</li>
-          <li><b>Мастер-приёмщик:</b> master1 / pass</li>
-          <li><b>Механик:</b> Петров Пётр / 001</li>
-          <li><b>Механик:</b> Сидоров Алексей / 002</li>
-        </ul>
+        <summary>Демо</summary>
+        <p>Админ: <b>admin</b> / <b>admin</b></p>
+      </details>
+    </div>
+  </section>
+
+  <!-- View: Master Login -->
+  <section id="view-login-master" class="view hidden">
+    <div class="auth-card">
+      <a class="back-link" href="#/">← Назад</a>
+      <h1>🧰 Вход для мастера-приёмщика</h1>
+      <p class="muted">Создание и закрытие заказ-нарядов</p>
+      <form id="form-login-master">
+        <label class="row">
+          <span>Логин</span>
+          <input name="username" autocomplete="username" required />
+        </label>
+        <label class="row">
+          <span>Пароль</span>
+          <input name="password" type="password" autocomplete="current-password" required />
+        </label>
+        <button class="primary block" type="submit">Войти как мастер</button>
+        <p id="login-master-error" class="error"></p>
+      </form>
+      <details class="hint">
+        <summary>Демо</summary>
+        <p>Мастер: <b>master1</b> / <b>pass</b></p>
+      </details>
+    </div>
+  </section>
+
+  <!-- View: Mechanic Login -->
+  <section id="view-login-mechanic" class="view hidden">
+    <div class="auth-card">
+      <a class="back-link" href="#/">← Назад</a>
+      <h1>🔧 Вход для автомеханика</h1>
+      <p class="muted">Введите табельный номер</p>
+      <form id="form-login-mechanic">
+        <label class="row">
+          <span>Имя</span>
+          <input name="name" placeholder="Например: Петров Пётр" required />
+        </label>
+        <label class="row">
+          <span>Табельный номер</span>
+          <input name="personnel_no" placeholder="Например: 001" required />
+        </label>
+        <button class="primary block" type="submit">Войти как механик</button>
+        <p id="login-mechanic-error" class="error"></p>
+      </form>
+      <details class="hint">
+        <summary>Демо</summary>
+        <p>Механик 1: <b>Петров Пётр</b> / таб. <b>001</b></p>
+        <p>Механик 2: <b>Сидоров Алексей</b> / таб. <b>002</b></p>
       </details>
     </div>
   </section>
@@ -75,6 +131,10 @@
     </header>
 
     <div class="container">
+      <div class="banner-info">
+        <strong>💡 Демо-режим:</strong> 4 пользователя и 1 заказ-наряд созданы при первом запуске. Они помечены <span class="badge-demo">демо</span>. На бесплатном Render данные могут сбрасываться при редплое — используйте <button class="link-btn" id="btn-export">экспорт</button> / <button class="link-btn" id="btn-import">импорт</button> для бэкапа, или <button class="link-btn" id="btn-reset-demo">сброс демо-данных</button>.
+      </div>
+
       <h3>Мастера-приёмщики</h3>
       <form id="form-add-master" class="row-form">
         <input name="name" placeholder="ФИО мастера" required />
