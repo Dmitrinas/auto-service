@@ -76,7 +76,21 @@ app.post('/api/auth/login', (req, res) => {
     user = row;
   } else if (role === 'mechanic') {
     if (!name || !personnel_no) return res.status(400).json({ error: 'name+personnel_no required' });
-    const row = db.prepare('SELECT * FROM users WHERE role=? AND personnel_no=? AND name=?').get('mechanic', personnel_no, name);
+    const nameTrim = String(name).trim();
+    const pnTrim = String(personnel_no).trim();
+    // 1. Exact match (fast path)
+    let row = db.prepare(
+      'SELECT * FROM users WHERE role=? AND personnel_no=? AND name=?'
+    ).get('mechanic', pnTrim, nameTrim);
+    // 2. ASCII-case-insensitive fallback (for Latin names; SQLite `lower()` doesn't
+    //    fold Cyrillic so we do it in JS)
+    if (!row) {
+      const lower = (s) => String(s).toLowerCase();
+      const candidates = db.prepare(
+        'SELECT * FROM users WHERE role=? AND personnel_no=?'
+      ).all('mechanic', pnTrim);
+      row = candidates.find(u => lower(u.name) === lower(nameTrim));
+    }
     if (!row) return res.status(401).json({ error: 'Механик с таким именем и табельным номером не найден' });
     user = row;
   } else {
@@ -104,7 +118,7 @@ app.post('/api/admin/users', authRequired, requireRole('admin'), (req, res) => {
     const info = db.prepare(
       'INSERT INTO users (role, name, username, password_hash) VALUES (?,?,?,?)'
     ).run('master', name, username, bcrypt.hashSync(password, 10));
-    return res.json({ id: info.lastInsertRowid });
+    return res.json({ id: info.lastInsertRowid, name, username, password });
   }
   if (role === 'mechanic') {
     if (!personnel_no) return res.status(400).json({ error: 'Для механика нужен табельный номер' });
@@ -113,7 +127,7 @@ app.post('/api/admin/users', authRequired, requireRole('admin'), (req, res) => {
     const info = db.prepare(
       'INSERT INTO users (role, name, personnel_no) VALUES (?,?,?)'
     ).run('mechanic', name, personnel_no);
-    return res.json({ id: info.lastInsertRowid });
+    return res.json({ id: info.lastInsertRowid, name, personnel_no });
   }
 });
 app.post('/api/admin/reset-demo', authRequired, requireRole('admin'), (req, res) => {

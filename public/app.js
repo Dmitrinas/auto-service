@@ -207,14 +207,11 @@ function initHashRouting() {
     if (App.token && App.user) return;
     const viewId = map[location.hash] || 'auth';
     showView(viewId);
+    // Apply minimalist style to auth/login views
+    const isAuth = viewId.startsWith('auth') || viewId.startsWith('login');
+    document.body.classList.toggle('minimal', isAuth);
   }
   window.addEventListener('hashchange', apply);
-  // Initial application
-  if (!App.token && location.hash !== '' && location.hash !== '#' && location.hash !== '#/') {
-    // Already set in URL
-  } else if (!App.token) {
-    showView('auth');
-  }
   apply();
 }
 
@@ -339,14 +336,15 @@ function initAdminView() {
     e.preventDefault();
     const fd = new FormData(e.target);
     try {
-      await api('/api/admin/users', { method: 'POST', body: JSON.stringify({
+      const res = await api('/api/admin/users', { method: 'POST', body: JSON.stringify({
         role: 'master',
         name: fd.get('name'),
         username: fd.get('username'),
         password: fd.get('password'),
       })});
       e.target.reset();
-      toast('Мастер добавлен', 'success');
+      showCredentialsDialog('Мастер создан',
+        `Имя: ${res.name}\nЛогин: ${res.username}\nПароль: ${res.password}\n\nПередайте сотруднику — он сможет войти через экран «Мастер-приёмщик».`);
       loadAdmin();
     } catch (err) { toast(err.message, 'error'); }
   });
@@ -354,15 +352,38 @@ function initAdminView() {
     e.preventDefault();
     const fd = new FormData(e.target);
     try {
-      await api('/api/admin/users', { method: 'POST', body: JSON.stringify({
+      const res = await api('/api/admin/users', { method: 'POST', body: JSON.stringify({
         role: 'mechanic',
         name: fd.get('name'),
         personnel_no: fd.get('personnel_no'),
       })});
       e.target.reset();
-      toast('Механик добавлен', 'success');
+      showCredentialsDialog('Механик создан',
+        `Имя: ${res.name}\nТабельный №: ${res.personnel_no}\n\nПередайте сотруднику — он сможет войти через экран «Автомеханик» вводя эти данные.`);
       loadAdmin();
     } catch (err) { toast(err.message, 'error'); }
+  });
+}
+
+function showCredentialsDialog(title, text) {
+  const dlg = document.createElement('div');
+  dlg.className = 'creds-modal';
+  dlg.innerHTML = `
+    <div class="creds-card">
+      <h3>${escapeHtml(title)}</h3>
+      <pre>${escapeHtml(text)}</pre>
+      <div class="creds-actions">
+        <button class="ghost" data-action="copy">📋 Скопировать</button>
+        <button class="primary" data-action="close">Готово</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(dlg);
+  dlg.addEventListener('click', (e) => {
+    if (e.target === dlg || e.target.dataset.action === 'close') dlg.remove();
+    if (e.target.dataset.action === 'copy') {
+      navigator.clipboard.writeText(text).then(() => toast('Скопировано', 'success'));
+    }
   });
 }
 
